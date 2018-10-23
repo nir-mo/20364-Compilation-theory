@@ -1,0 +1,5 @@
+[playlist]
+    [song] Hel$o "  new line \n inside string " [length] 1:9
+
+    song "My song" [artist]
+
