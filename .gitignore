@@ -1,0 +1,4 @@
+# No pyCharm files.
+.idea/*
+
+*.pyc
