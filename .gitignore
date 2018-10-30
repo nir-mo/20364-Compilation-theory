@@ -1,3 +1,6 @@
+# Virtual env.
+venv/*
+
 # No pyCharm files.
 .idea/*
 
