@@ -1,0 +1,28 @@
+TOKEN         LEXEME        ATTRIBUTE   
+
+PLAYLIST      [playlist]                
+NUMBER        1             1           
+SONG          [song]                    
+QUOTED_STRING  "Hello baby"  Hello baby  
+ARTIST        [artist]                  
+STRING        nirmo                     
+STRING        &                         
+STRING        friends                   
+LENGTH        [length]                  
+DURATION      1:11                      
+NUMBER        2             2           
+SONG          [song]                    
+QUOTED_STRING  "Ma [song] #7"  Ma [song] #7
+ARTIST        [artist]                  
+STRING        1st                       
+STRING        dude!                     
+LENGTH        [length]                  
+DURATION      77:17                     
+NUMBER        3             3           
+SONG          [song]                    
+QUOTED_STRING  "Nothing else matters"  Nothing else matters
+ARTIST        [artist]                  
+STRING        Metallica                 
+LENGTH        [length]                  
+DURATION      3:33                      
+

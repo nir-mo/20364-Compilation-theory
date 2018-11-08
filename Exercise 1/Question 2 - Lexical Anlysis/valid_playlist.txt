@@ -1,0 +1,6 @@
+    [playlist]
+
+1 [song] "Hello baby" [artist] nirmo & friends [length] 1:11
+2 [song] "Ma [song] #7" [artist] 1st dude! [length]     77:17
+
+3 [song] "Nothing else matters" [artist] Metallica [length]  3:33
