@@ -6,79 +6,78 @@
 # Author: Nir Moshe.
 
 INPUT = "bcbccbaca"
+input_position = 0
 
 
-def error(input_position):
-	raise Exception("Invalid syntax (position: %d = '%s')." % (input_position, INPUT[input_position]))
+def error():
+	raise Exception("Invalid syntax (position: %d = '%s')." % (input_position, lookahead()))
 
 
-def A(input_position):
-	if INPUT[input_position] == 'a':
-		input_position = input_position + 1
-		if INPUT[input_position] == 'c':
-			input_position = input_position + 1
-			return A(input_position)
-		else:
-			error(input_position)
+def match(token):
+	global input_position
+	if lookahead() == token:
+		input_position += 1
+	else:
+		error()
 
-	elif INPUT[input_position] == 'b':
-		input_position = input_position + 1
-		if INPUT[input_position] == 'b':
-			input_position = S(input_position)
-			return A(input_position)
-		else:
-			error(input_position)
 
-	elif INPUT[input_position] == 'c':
-		input_position = input_position + 1
-		if INPUT[input_position] == 'b':
-			input_position = input_position + 1
-			return S(input_position)
-		else:
-			error(input_position)
+def lookahead():
+	return INPUT[input_position]
+
+
+def A():
+	if lookahead() == 'a':
+		match("a")
+		match("c")
+		A()
+
+	elif lookahead() == 'b':
+		match('b')
+		match('b')
+		S()
+		A()
+
+	elif lookahead() == 'c':
+		match('c')
+		match('b')
+		S()
 
 	else:
-		error(input_position)
+		error()
 
 
-def S(input_position):
-	if INPUT[input_position] == "c":
-		input_position = input_position + 1
-		input_position = A(input_position)
-		input_position = B(input_position)
-		if INPUT[input_position] == "c":
-			return input_position + 1
-		else:
-			error(input_position)
+def S():
+	if lookahead() == "c":
+		match('c')
+		A()
+		B()
+		match("c")
 
-	elif INPUT[input_position] == 'b' or INPUT[input_position] == 'a':
-		input_position = B(input_position)
-		if INPUT[input_position] == "a":
-			return input_position + 1
-		else:
-			error(input_position)
+	elif lookahead() in ('a', 'b'):
+		B()
+		match("a")
 
 	else:
-		error(input_position)
+		error()
 
 
-def B(input_position):
-	if INPUT[input_position] == "b":
-		input_position = input_position + 1
-		return A(input_position)
+def B():
+	if lookahead() == "b":
+		match("b")
+		A()
 
 	# This is the rule B -> epsilon.
-	elif INPUT[input_position] == 'c' or INPUT[input_position] == 'a':
-		return input_position
+	elif lookahead() in ('a', 'c'):
+		pass
 
 	else:
-		error(input_position)
+		error()
 
 
 def main():
 	try:
-		res = S(0)
-		if res != len(INPUT):
+		S()
+		if input_position != len(INPUT):
 			print("Invalid word")
 		else:
 			print("word in language!")
