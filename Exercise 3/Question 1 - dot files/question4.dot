@@ -1,0 +1,133 @@
+digraph G {
+
+
+
+  I0 [shape=plaintext label=<
+        <table  border='1' cellborder='0'>
+            <tr><td bgcolor="gray">I0</td></tr>
+            <tr><td>S' &rarr; .S, $</td></tr>
+            <tr><td>S &rarr; .zBA, $</td></tr>
+        </table>
+    >];
+
+
+  I1 [shape=plaintext label=<
+        <table  border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I1</td></tr>
+            <tr><td>S' &rarr; S., $</td></tr>
+        </table>
+    >];
+
+  I2 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I2</td></tr>
+            <tr><td>S &rarr; z.BA, $</td></tr>
+            <tr><td>B &rarr; .bB, a/b/z</td></tr>
+            <tr><td>B &rarr; ., a/b/z</td></tr>
+        </table>
+    >];
+
+
+      I3 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I3</td></tr>
+            <tr><td>B &rarr; b.B, a/b/z</td></tr>
+            <tr><td>B &rarr; .bB, a/b/z</td></tr>
+            <tr><td>B &rarr; ., a/b/z</td></tr>
+        </table>
+    >];
+
+
+  I4 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I4</td></tr>
+            <tr><td>S &rarr; zB.A, $</td></tr>
+            <tr><td>A &rarr; .BM, $</td></tr>
+            <tr><td>A &rarr; .a, $</td></tr>
+            <tr><td>B &rarr; .bB, z</td></tr>
+            <tr><td>B &rarr; ., z</td></tr>
+        </table>
+    >];
+
+    I5 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I5</td></tr>
+            <tr><td>S &rarr; zBA., $</td></tr>
+        </table>
+    >];
+
+
+  I6 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I6</td></tr>
+            <tr>
+                <td>A &rarr; a., $</td>
+            </tr>
+        </table>
+    >];
+
+
+    I7 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I7</td></tr>
+            <tr><td>B &rarr; b.B, b</td></tr>
+            <tr><td>B &rarr; .bB, b</td></tr>
+            <tr><td>B &rarr; ., b</td></tr>
+        </table>
+    >];
+
+      I8 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I8</td></tr>
+            <tr><td>B &rarr; bB., a/b/z</td></tr>
+        </table>
+    >];
+
+    I9 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I9</td></tr>
+            <tr><td>B &rarr; bB., z</td></tr>
+        </table>
+    >];
+
+    I10 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I10</td></tr>
+            <tr><td>A &rarr; B.M, $</td></tr>
+            <tr><td>M &rarr; .z, $</td></tr>
+        </table>
+    >];
+
+    I11 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I11</td></tr>
+            <tr><td>M &rarr; z., $</td></tr>
+        </table>
+    >];
+
+        I12 [shape=plaintext label=<
+        <table border='1' cellborder='0'>
+        <tr><td bgcolor="gray">I12</td></tr>
+            <tr><td>A &rarr; BM., $</td></tr>
+        </table>
+    >];
+
+
+
+    I0 -> I1 [label="S"];
+    I0 -> I2 [label="z"];
+    I1 -> accept [label="$"];
+    I2 -> I4 [label="B"];
+    I2 -> I3 [label="b"];
+    I3 -> I8 [label="B"];
+    I3 -> I3 [label="b"];
+    I4 -> I5 [label="A"];
+    I4 -> I6 [label="a"];
+    I4 -> I10 [label="B"];
+    I4 -> I7 [label="b"];
+    I7 -> I7 [label="b"];
+    I7 -> I9 [label="B"];
+    I10 -> I11 [label="z"];
+    I10 -> I12 [label="M"];
+
+}
