@@ -1,0 +1,23 @@
+/*
+ * This is an example of a valid CPL file.
+ *
+ * author: Nir Moshe
+ *
+ */
+
+a, b: float;
+x,y,z: int;
+g: float;
+gg: int;
+{
+    read(a);
+    read(b);
+
+    if (a<b)
+        write( a);
+    else
+        write(b);
+
+    c = 3.0;
+    x = static_cast< int >(c);
+}
