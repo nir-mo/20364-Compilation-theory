@@ -3,7 +3,6 @@ from collections import namedtuple
 from lark.visitors import Visitor
 
 from exceptions import CPLException, CPLCompoundException
-from lark_utils import is_lark_token
 
 __author__ = "Nir Moshe"
 
@@ -15,6 +14,7 @@ class SymbolAlreadyExistsError(CPLException):
     def __init__(self, first_symbol, redefinition_symbol_name, line):
         self.first_symbol = first_symbol
         self.redefinition_symbol_name = redefinition_symbol_name
+        self.line = line
 
 
 class Types:
@@ -31,6 +31,20 @@ class SymbolTable(object):
             raise SymbolAlreadyExistsError(self.symbols[name], name, line)
 
         self.symbols[name] = Symbol(name, type, line)
+
+    def get_symbol(self, name):
+        """returns `Symbol` or None if the symbol doesn't exists."""
+        return self.symbols.get(name)
+
+    @classmethod
+    def build_form_ast(cls, cpl_ast):
+        symbol_table = cls()
+        builder = SymbolTableBuilder(symbol_table)
+        builder.visit(cpl_ast)
+        if builder.errors:
+            raise CPLCompoundException(builder.errors)
+
+        return symbol_table
 
 
 class SymbolTableBuilder(Visitor):
@@ -68,15 +82,14 @@ class SymbolTableBuilder(Visitor):
         if type_token.type == "INT":
             self._current_declaration_type = Types.INT
 
-        else: # It has to be a float.. otherwise lark would have raise an exception.
+        else:  # It has to be a float.. otherwise lark would have raise an exception.
             self._current_declaration_type = Types.FLOAT
 
-    @classmethod
-    def build_form_ast(cls, cpl_ast):
-        symbol_table = SymbolTable()
-        builder = cls(symbol_table)
-        builder.visit(cpl_ast)
-        if builder.errors:
-            raise CPLCompoundException(builder.errors)
 
-        return symbol_table
+def is_lark_token(obj):
+    try:
+        _, _ = obj.type, obj.value
+        return True
+
+    except AttributeError:
+        return False

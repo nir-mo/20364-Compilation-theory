@@ -6,18 +6,15 @@
  */
 
 a, b: float;
-x,y,z: int;
-g: float;
-gg: int;
 {
-    read(a);
+  /*  read(a);
     read(b);
 
     if (a<b)
         write( a);
     else
-        write(b);
+        write(b);*/
 
-    c = 3.0;
-    x = static_cast< int >(c);
+    b = 3.3 * (5 + aint);
+    /*x = static_cast< int >(b);*/
 }

@@ -39,22 +39,3 @@ def build_ast(tokens):
 def get_default_cpl_parser():
     with open(os.path.join(os.path.dirname(__file__), "cpl.y")) as CPLSyntax:
         return Lark(CPLSyntax.read(), parser="lalr", lexer=CLALexerAdapter)
-
-
-
-
-
-
-
-
-
-if __name__ == "__main__":
-    import sys
-    input_filename = sys.argv[1]
-    with open(input_filename) as inf:
-        t = build_ast(CPLTokenizer(inf.read()))
-        # print(t.pretty())
-        sym = SymbolTable()
-        g = QuadBuilder(symbol_table=sym)
-        g.visit(t)
-        print(sym.symbols)
