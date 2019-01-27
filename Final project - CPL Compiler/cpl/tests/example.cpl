@@ -15,6 +15,6 @@ a, b: float;
     else
         write(b);*/
 
-    b = 3.3 * (5 + aint);
+    if( !(a > b)  ) {} else {}
     /*x = static_cast< int >(b);*/
 }

@@ -120,6 +120,42 @@ class QuadTransformerTest(TestCase):
             code
         )
 
+    def test_boolexpr(self):
+        # !(a > b)
+        tree = Tree("boolexpr", [
+            Tree("boolterm", [
+                Tree("boolfactor", [
+                    FakeToken("NOT", ''),
+                    FakeToken("LEFT_PARENTHESIS", ''),
+                    Tree("boolexpr", [
+                        Tree("boolterm", [
+                            Tree("boolfactor", [
+                                Tree("expression", [
+                                    Tree("term", [
+                                        Tree("factor", [FakeToken("ID", 'a_int')])
+                                    ])
+                                ]),
+                                FakeToken("RELOP", '>'),
+                                Tree("expression", [
+                                    Tree("term", [
+                                        Tree("factor", [FakeToken("ID", 'b_int')])
+                                    ])
+                                ])
+                            ])
+                        ])
+                    ])
+                ])
+            ])
+        ])
+        int_result = self.transformer.transform(tree)
+        self.assertEqual("t1", int_result.value)
+        self.assertEqual(Types.INT, int_result.type)
+        code = [inst.code for inst in int_result.code]
+        self.assertEqual(
+            ['IGRT t1 a_int b_int', 'INQL t1 t1 1'],
+            code
+        )
+
 
 if __name__ == "__main__":
     main()

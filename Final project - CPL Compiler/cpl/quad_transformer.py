@@ -35,6 +35,15 @@ class CPLTransformer(Transformer):
     def expression(self, tree):
         return Expression(tree)
 
+    def boolfactor(self, tree):
+        return BoolFactor(tree)
+
+    def boolterm(self, tree):
+        return BoolTerm(tree)
+
+    def boolexpr(self, tree):
+        return BoolExpr(tree)
+
     def declarations(self, _):
         return [] # ignore the CPL declarations.
 
@@ -45,55 +54,106 @@ class CPLObject(object):
     def get_node_type(self):
         return self.NODE_TYPE
 
-    def copy_properties(self, subtree):
-        self.type = subtree[0].type
-        self.value = subtree[0].value
-        self.code = subtree[0].code
+    @staticmethod
+    def get_subtree_node_type(subtree):
+        try:
+            return subtree[0].get_node_type()
+        except AttributeError:
+            return None
+
+    def copy_properties_of_node(self, subtree, index=0):
+        self.type = subtree[index].type
+        self.value = subtree[index].value
+        self.code = subtree[index].code
+
+    def handle_binary_operation(self, subtree):
+        left = subtree[0]
+        operator_token = subtree[1].value
+        right = subtree[2]
+        self.type = Types.FLOAT if Types.FLOAT in (right.type, left.type) else Types.INT
+        self.value = TemporaryVariables.get_new_temporary_variable()
+
+        # build the code.
+        self.code = left.code + right.code
+        self.code.append(
+            QUADInstruction(self.value, left.value, right.value, operator_token, self.type)
+        )
 
     def __str__(self):
         return "%s(%s)" % (self.__class__.__name__, self.value)
+
+
+class BoolExpr(CPLObject):
+    NODE_TYPE = "boolexpr"
+
+    def __init__(self, tree):
+        if self.get_subtree_node_type(tree) == BoolTerm.NODE_TYPE:
+            self.copy_properties_of_node(tree)
+        else:
+            self.handle_or(tree)
+
+    def handle_or(self, subtree):
+        left = subtree[0]
+        right = subtree[2]
+        self.type = Types.FLOAT if Types.FLOAT in (right.type, left.type) else Types.INT
+        self.value = TemporaryVariables.get_new_temporary_variable()
+        self.code = left.code + right.code + [
+            QUADInstruction(self.value, left.value, right.value, "+", self.type),
+            QUADInstruction(self.value, self.value, 1, ">", self.type)
+        ]
+
+class BoolTerm(CPLObject):
+    NODE_TYPE = "boolterm"
+
+    def __init__(self, tree):
+        if self.get_subtree_node_type(tree) == BoolFactor.NODE_TYPE:
+            self.copy_properties_of_node(tree)
+        else:
+            self.handle_and(tree)
+
+    def handle_and(self, subtree):
+        left = subtree[0]
+        right = subtree[2]
+        self.type = Types.FLOAT if Types.FLOAT in (right.type, left.type) else Types.INT
+        self.value = TemporaryVariables.get_new_temporary_variable()
+        self.code = left.code + right.code + [
+            QUADInstruction(self.value, left.value, 1, "==", self.type),
+            QUADInstruction(self.value, right.value, self.value, "==", self.type)
+        ]
+
+
+class BoolFactor(CPLObject):
+    NODE_TYPE = "boolfactor"
+
+    def __init__(self, tree):
+        if self.get_subtree_node_type(tree) == Expression.NODE_TYPE:
+            self.handle_binary_operation(tree)
+        else:
+            self.handle_boolexpression(tree)
+
+    def handle_boolexpression(self, tree):
+        self.copy_properties_of_node(tree, index=2)
+        self.code.append(QUADInstruction.get_not(self.value, self.value, self.type))
 
 
 class Expression(CPLObject):
     NODE_TYPE = "expression"
 
     def __init__(self, subtree):
-        if subtree[0].get_node_type() == Term.NODE_TYPE:
-            self.copy_properties(subtree)
+        if self.get_subtree_node_type(subtree) == Term.NODE_TYPE:
+            self.copy_properties_of_node(subtree)
         else:
-            self.handle_expression(subtree)
-
-    def handle_expression(self, subtree):
-        expression = subtree[0]
-        operator_token = subtree[1].value
-        term = subtree[2]
-        self.type = Types.FLOAT if Types.FLOAT in (term.type, expression.type) else Types.INT
-        self.value = TemporaryVariables.get_new_temporary_variable()
-
-        # build the code.
-        self.code = expression.code + term.code
-        self.code.append(ADD(self.value, expression.value, term.value, operator_token, self.type))
+            self.handle_binary_operation(subtree)
 
 
 class Term(CPLObject):
     NODE_TYPE = "term"
 
     def __init__(self, subtree):
-        if subtree[0].get_node_type() == Factor.NODE_TYPE:
-            self.copy_properties(subtree)
+        if self.get_subtree_node_type(subtree) == Factor.NODE_TYPE:
+            self.copy_properties_of_node(subtree)
         else: #  This is a term.
-            self.handle_term(subtree)
-
-    def handle_term(self, subtree):
-        term = subtree[0]
-        operator_token = subtree[1].value
-        factor = subtree[2]
-        self.type = Types.FLOAT if Types.FLOAT in (term.type, factor.type) else Types.INT
-        self.value = TemporaryVariables.get_new_temporary_variable()
-
-        # build the code.
-        self.code = term.code + factor.code
-        self.code.append(MLT(self.value, term.value, factor.value, operator_token, self.type))
+            self.handle_binary_operation(subtree)
 
 
 class Factor(CPLObject):
@@ -106,7 +166,7 @@ class Factor(CPLObject):
         elif first_token.type == "ID":
             self.handle_id(ast_subtree, symbol_table)
         elif first_token.type == "LEFT_PARENTHESIS":
-            self.handle_expression(ast_subtree)
+            self.copy_properties_of_node(ast_subtree, 1)
 
     def handle_number(self, ast_subtree):
         self.type = self.get_num_type(ast_subtree[0].value)
@@ -124,12 +184,6 @@ class Factor(CPLObject):
         self.value = symbol.name
         self.code = []
 
-    def handle_expression(self, ast_subtree):
-        expression = ast_subtree[1]
-        self.type = expression.type
-        self.value = expression.value
-        self.code = expression.code
-
     @staticmethod
     def get_num_type(number):
         if type(number) == float:
@@ -138,34 +192,44 @@ class Factor(CPLObject):
             return Types.INT
 
 
-class MLT(object):
+class QUADInstruction(object):
+    # TODO: handle the rest of the RELOP operations.
+    QUAD_OPERATORS_TABLE = {
+        ("*", Types.INT): "IMLT",
+        ("*", Types.FLOAT): "RMLT",
+        ("/", Types.INT): "IDIV",
+        ("/", Types.FLOAT): "RDIV",
+        ("+", Types.INT): "IADD",
+        ("+", Types.FLOAT): "RADD",
+        ("-", Types.INT): "ISUB",
+        ("-", Types.FLOAT): "RSUB",
+        ("==", Types.INT): "IEQL",
+        ("==", Types.FLOAT): "REQL",
+        ("!=", Types.INT): "INQL",
+        ("!=", Types.FLOAT): "RNQL",
+        (">", Types.INT): "IGRT",
+        (">", Types.FLOAT): "RGRT",
+        ("<", Types.INT): "ILSS",
+        ("<", Types.FLOAT): "RLSS",
+    }
+
     def __init__(self, dest, op1, op2, operator, type):
         self.dest, self.op1, self.op2, self.type = dest, op1, op2, type
         self.operator = operator
+        self.labels = set()
 
     @property
     def code(self):
-        if self.operator == "*":
-            asm_inst = "IMLT" if self.type == Types.INT else "RMLT"
-        else:
-            asm_inst = "IDIV" if self.type == Types.INT else "RDIV"
+        return "%s %s %s %s" % (
+            self.QUAD_OPERATORS_TABLE[(self.operator, self.type)],
+            self.dest,
+            self.op1,
+            self.op2
+        )
 
-        return "%s %s %s %s" % (asm_inst, self.dest, self.op1, self.op2)
-
-
-class ADD(object):
-    def __init__(self, dest, op1, op2, operator, type):
-        self.dest, self.op1, self.op2, self.type = dest, op1, op2, type
-        self.operator = operator
-
-    @property
-    def code(self):
-        if self.operator == "+":
-            asm_inst = "IADD" if self.type == Types.INT else "RADD"
-        else:
-            asm_inst = "ISUB" if self.type == Types.INT else "RSUB"
-
-        return "%s %s %s %s" % (asm_inst, self.dest, self.op1, self.op2)
+    @classmethod
+    def get_not(cls, dest, op1, type):
+        return cls(dest, op1, 1, "!=", type)
 
 
 if __name__ == "__main__":
