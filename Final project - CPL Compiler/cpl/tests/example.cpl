@@ -6,15 +6,7 @@
  */
 
 a, b: float;
+c: int;
 {
-  /*  read(a);
-    read(b);
-
-    if (a<b)
-        write( a);
-    else
-        write(b);*/
-
-    if( !(a > b)  ) {} else {}
-    /*x = static_cast< int >(b);*/
+   a = static_cast<int>(3.33);
 }

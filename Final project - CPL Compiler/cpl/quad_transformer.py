@@ -44,6 +44,21 @@ class CPLTransformer(Transformer):
     def boolexpr(self, tree):
         return BoolExpr(tree)
 
+    def input_stmt(self, tree):
+        return InputStatement(tree, self.symbol_table)
+
+    def output_stmt(self, tree):
+        return OutputStatement(tree)
+
+    def assignment_stmt(self, tree):
+        return AssignmentStmt(tree, self.symbol_table)
+
+    def cast_stmt(self, tree):
+        return CastStmt(tree, self.symbol_table)
+
+    def type(self, tree):
+        return Types.INT if tree[0].type == "INT" else Types.FLOAT
+
     def declarations(self, _):
         return [] # ignore the CPL declarations.
 
@@ -70,17 +85,81 @@ class CPLObject(object):
         left = subtree[0]
         operator_token = subtree[1].value
         right = subtree[2]
-        self.type = Types.FLOAT if Types.FLOAT in (right.type, left.type) else Types.INT
+        self.handle_binary_operation_default_values(subtree)
+        self.code.append(QUADInstruction(self.value, left.value, right.value, operator_token, self.type))
+
+    def handle_binary_operation_default_values(self, subtree):
+        left = subtree[0]
+        right = subtree[2]
         self.value = TemporaryVariables.get_new_temporary_variable()
 
+        if left.type == right.type:
+            self.type = left.type
+            conversion_code = []
+        else:
+            self.type = Types.FLOAT
+            temp = TemporaryVariables.get_new_temporary_variable()
+            if left.type == Types.INT:
+                conversion_code = [QUADInstruction(temp, left.value, "", "CAST_TO_REAL", Types.INT)]
+                left.value = temp
+            else:
+                conversion_code = [QUADInstruction(temp, right.value, "", "CAST_TO_REAL", Types.INT)]
+                right.value = temp
+
         # build the code.
-        self.code = left.code + right.code
-        self.code.append(
-            QUADInstruction(self.value, left.value, right.value, operator_token, self.type)
-        )
+        self.code = left.code + right.code + conversion_code
 
     def __str__(self):
         return "%s(%s)" % (self.__class__.__name__, self.value)
+
+
+class CastStmt(CPLObject):
+    NODE_TYPE = "cast_stmt"
+
+    def __init__(self, tree, symbol_table):
+        id = Factor(tree, symbol_table)
+        self.type = tree[4]
+        expression = tree[7]
+        self.value = id.value
+        if id.type == Types.INT and self.type == Types.FLOAT:
+            raise ValueError("Invalid static_cast! can't assign float to int!")
+
+        self.code = expression.code
+        if expression.type == Types.INT and self.type == Types.FLOAT:
+            self.code.append(QUADInstruction(self.value, expression.value, "", "CAST_TO_REAL", Types.INT))
+        elif expression.type == Types.FLOAT and self.type == Types.INT:
+            self.code.append(QUADInstruction(self.value, expression.value, "", "CAST_TO_INT", Types.FLOAT))
+
+
+class AssignmentStmt(CPLObject):
+    NODE_TYPE = "AssignmentStmt"
+
+    def __init__(self, tree, symbol_table):
+        left = Factor(tree, symbol_table)
+        right = tree[2]
+        if left.type == Types.INT and right.type == Types.FLOAT:
+            raise ValueError("Invalid assignment! can't assign float to int!")
+
+        self.type = Types.FLOAT if Types.FLOAT in (right.type, left.type) else Types.INT
+        self.value = left.value
+        self.code = right.code + [QUADInstruction(self.value, right.value, "", "=", self.type)]
+
+
+class OutputStatement(CPLObject):
+    NODE_TYPE = "output_stmt"
+
+    def __init__(self, tree):
+        self.copy_properties_of_node(tree, index=2)
+        self.code.append(QUADInstruction(self.value, "", "", "WRITE", self.type))
+
+
+class InputStatement(CPLObject):
+    NODE_TYPE = "input_stmt"
+
+    def __init__(self, tree, symbol_table):
+        tree[2] = Factor([tree[2]], symbol_table)
+        self.copy_properties_of_node(tree, index=2)
+        self.code = [QUADInstruction(self.value, "", "", "READ", self.type)]
 
 
 class BoolExpr(CPLObject):
@@ -95,12 +174,9 @@ class BoolExpr(CPLObject):
     def handle_or(self, subtree):
         left = subtree[0]
         right = subtree[2]
-        self.type = Types.FLOAT if Types.FLOAT in (right.type, left.type) else Types.INT
-        self.value = TemporaryVariables.get_new_temporary_variable()
-        self.code = left.code + right.code + [
-            QUADInstruction(self.value, left.value, right.value, "+", self.type),
-            QUADInstruction(self.value, self.value, 1, ">", self.type)
-        ]
+        self.handle_binary_operation_default_values(subtree)
+        self.code += QUADInstruction.get_or(self.value, left.value, right.value, self.type)
+
 
 class BoolTerm(CPLObject):
     NODE_TYPE = "boolterm"
@@ -114,9 +190,8 @@ class BoolTerm(CPLObject):
     def handle_and(self, subtree):
         left = subtree[0]
         right = subtree[2]
-        self.type = Types.FLOAT if Types.FLOAT in (right.type, left.type) else Types.INT
-        self.value = TemporaryVariables.get_new_temporary_variable()
-        self.code = left.code + right.code + [
+        self.handle_binary_operation_default_values(subtree)
+        self.code += [
             QUADInstruction(self.value, left.value, 1, "==", self.type),
             QUADInstruction(self.value, right.value, self.value, "==", self.type)
         ]
@@ -127,13 +202,41 @@ class BoolFactor(CPLObject):
 
     def __init__(self, tree):
         if self.get_subtree_node_type(tree) == Expression.NODE_TYPE:
-            self.handle_binary_operation(tree)
+            operator = tree[1].value
+            if operator == ">=":
+                self.handle_larger_or_equal(tree)
+            elif operator == "<=":
+                self.handle_smaller_or_equal(tree)
+            else:
+                self.handle_binary_operation(tree)
         else:
             self.handle_boolexpression(tree)
 
     def handle_boolexpression(self, tree):
         self.copy_properties_of_node(tree, index=2)
         self.code.append(QUADInstruction.get_not(self.value, self.value, self.type))
+
+    def handle_larger_or_equal(self, subtree):
+        left = subtree[0]
+        right = subtree[2]
+        self.handle_binary_operation_default_values(subtree)
+        self.value = TemporaryVariables.get_new_temporary_variable()
+        temp = TemporaryVariables.get_new_temporary_variable()
+        self.code += [
+            QUADInstruction(temp, left.value, right.value, "==", self.type),
+            QUADInstruction(self.value, left.value, right.value, ">", self.type)
+        ] + QUADInstruction.get_or(self.value, self.value, temp, self.type)
+
+    def handle_smaller_or_equal(self, subtree):
+        left = subtree[0]
+        right = subtree[2]
+        self.handle_binary_operation_default_values(subtree)
+        self.value = TemporaryVariables.get_new_temporary_variable()
+        temp = TemporaryVariables.get_new_temporary_variable()
+        self.code += [
+            QUADInstruction(temp, left.value, right.value, "==", self.type),
+            QUADInstruction(self.value, left.value, right.value, "<", self.type)
+        ] + QUADInstruction.get_or(self.value, self.value, temp, self.type)
 
 
 class Expression(CPLObject):
@@ -152,7 +255,7 @@ class Term(CPLObject):
     def __init__(self, subtree):
         if self.get_subtree_node_type(subtree) == Factor.NODE_TYPE:
             self.copy_properties_of_node(subtree)
-        else: #  This is a term.
+        else:
             self.handle_binary_operation(subtree)
 
 
@@ -193,7 +296,6 @@ class Factor(CPLObject):
 
 
 class QUADInstruction(object):
-    # TODO: handle the rest of the RELOP operations.
     QUAD_OPERATORS_TABLE = {
         ("*", Types.INT): "IMLT",
         ("*", Types.FLOAT): "RMLT",
@@ -211,6 +313,14 @@ class QUADInstruction(object):
         (">", Types.FLOAT): "RGRT",
         ("<", Types.INT): "ILSS",
         ("<", Types.FLOAT): "RLSS",
+        ("READ", Types.INT): "IINP",
+        ("READ", Types.FLOAT): "RINP",
+        ("WRITE", Types.INT): "IPRT",
+        ("WRITE", Types.FLOAT): "RPRT",
+        ("=", Types.INT): "IASN",
+        ("=", Types.FLOAT): "RASN",
+        ("CAST_TO_REAL", Types.INT): "ITOR",
+        ("CAST_TO_INT", Types.FLOAT): "RTOI",
     }
 
     def __init__(self, dest, op1, op2, operator, type):
@@ -220,16 +330,21 @@ class QUADInstruction(object):
 
     @property
     def code(self):
-        return "%s %s %s %s" % (
+        inst = "%s %s %s %s" % (
             self.QUAD_OPERATORS_TABLE[(self.operator, self.type)],
             self.dest,
             self.op1,
             self.op2
         )
+        return inst.strip()
 
     @classmethod
     def get_not(cls, dest, op1, type):
         return cls(dest, op1, 1, "!=", type)
+
+    @classmethod
+    def get_or(cls, dest, op1, op2, type):
+        return [cls(dest, op1, op2, "+", type), cls(dest, dest, 0, ">", type)]
 
 
 if __name__ == "__main__":
