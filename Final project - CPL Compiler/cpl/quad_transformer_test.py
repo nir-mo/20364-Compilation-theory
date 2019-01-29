@@ -124,25 +124,25 @@ class QuadTransformerTest(TestCase):
     def test_boolexpr(self):
         # Test expressions with the pattern: !(a_int RELOP c_float)
         operators_to_instructions = {
-            ">": ['ITOR t2 a_int', 'RGRT t1 t2 c_float', 'RNQL t1 t1 1'],
-            "<": ['ITOR t2 a_int', 'RLSS t1 t2 c_float', 'RNQL t1 t1 1'],
-            "==": ['ITOR t2 a_int', 'REQL t1 t2 c_float', 'RNQL t1 t1 1'],
-            "!=": ['ITOR t2 a_int', 'RNQL t1 t2 c_float', 'RNQL t1 t1 1'],
+            ">": ['ITOR t2 a_int', 'RGRT t1 t2 c_float', 'INQL t1 t1 1'],
+            "<": ['ITOR t2 a_int', 'RLSS t1 t2 c_float', 'INQL t1 t1 1'],
+            "==": ['ITOR t2 a_int', 'REQL t1 t2 c_float', 'INQL t1 t1 1'],
+            "!=": ['ITOR t2 a_int', 'RNQL t1 t2 c_float', 'INQL t1 t1 1'],
             ">=": [
                 'ITOR t2 a_int',
                 'REQL t4 t2 c_float',
                 'RGRT t3 t2 c_float',
-                'RADD t3 t3 t4',
-                'RGRT t3 t3 0',
-                'RNQL t3 t3 1'
+                'IADD t3 t3 t4',
+                'IGRT t3 t3 0',
+                'INQL t3 t3 1'
             ],
             "<=": [
                 'ITOR t2 a_int',
                 'REQL t4 t2 c_float',
                 'RLSS t3 t2 c_float',
-                'RADD t3 t3 t4',
-                'RGRT t3 t3 0',
-                'RNQL t3 t3 1'
+                'IADD t3 t3 t4',
+                'IGRT t3 t3 0',
+                'INQL t3 t3 1'
             ],
         }
         for operator, instructions in operators_to_instructions.items():
@@ -172,9 +172,9 @@ class QuadTransformerTest(TestCase):
                     ])
                 ])
             ])
-            float_result = self.transformer.transform(tree)
-            self.assertEqual(Types.FLOAT, float_result.type)
-            code = [inst.code for inst in float_result.code]
+            int_result = self.transformer.transform(tree)
+            self.assertEqual(Types.INT, int_result.type)
+            code = [inst.code for inst in int_result.code]
             self.assertEqual(instructions, code)
 
     def test_assignment(self):
@@ -240,6 +240,27 @@ class QuadTransformerTest(TestCase):
         code = [inst.code for inst in result.code]
         self.assertEqual(['RTOI a_int 3.33'], code)
 
+    def test_static_cast_same_type(self):
+        tree = Tree("cast_stmt", [
+            FakeToken("ID", 'a_int'),
+            FakeToken("EQUAL_SIGN", ''),
+            FakeToken("STATIC_CAST", ''),
+            FakeToken("LEFT_STATIC_CAST_BRACKETS", ''),
+            Tree("type", [FakeToken("INT", '')]),
+            FakeToken("RIGHT_STATIC_CAST_BRACKETS", ''),
+            FakeToken("LEFT_PARENTHESIS", ''),
+            Tree("expression", [
+                Tree("term", [
+                    Tree("factor", [FakeToken("ID", "b_int")])
+                ])
+            ])
+        ])
+        result = self.transformer.transform(tree)
+        self.assertEqual("a_int", result.value)
+        self.assertEqual(Types.INT, result.type)
+        code = [inst.code for inst in result.code]
+        self.assertEqual(['IASN a_int b_int'], code)
+
     def test_invalid_cast(self):
         # test: int a = static_cast<float>(3.33)
         tree = Tree("cast_stmt", [
@@ -258,6 +279,63 @@ class QuadTransformerTest(TestCase):
         ])
         with self.assertRaises(ValueError):
             self.transformer.transform(tree)
+
+    def test_if(self):
+        tree = Tree("if_stmt", [
+            FakeToken("IF", ''),
+            FakeToken("LEFT_PARENTHESIS", ''),
+            Tree("boolexpr", [
+                Tree("boolterm", [
+                    Tree("boolfactor", [
+                        Tree("expression", [
+                            Tree("term", [Tree("factor", [FakeToken("ID", 'a_int')])])
+                        ]),
+                        FakeToken("RELOP", '<'),
+                        Tree("expression", [
+                            Tree("term", [
+                                Tree("factor", [FakeToken("ID", 'b_int')])
+                            ])
+                        ])
+                    ])
+                ])
+            ]),
+            FakeToken("RIGHT_PARENTHESIS", ''),
+            Tree("stmt", [
+                Tree("output_stmt", [
+                    FakeToken("WRITE", ''),
+                    FakeToken("LEFT_PARENTHESIS", ''),
+                    Tree("expression", [
+                        Tree("term", [
+                            Tree("factor", [FakeToken("ID", 'a_int')])
+                        ])
+                    ]),
+                    FakeToken("RIGHT_PARENTHESIS", ''),
+                    FakeToken("SEMICOLON", '')
+                ])]),
+            FakeToken("ELSE", ''),
+            Tree("stmt", [
+                Tree("output_stmt", [
+                    FakeToken("WRITE", ''),
+                    FakeToken("LEFT_PARENTHESIS", ''),
+                    Tree("expression", [
+                        Tree("term", [Tree("factor", [FakeToken("ID", 'b_int')])])
+                    ]),
+                    FakeToken("RIGHT_PARENTHESIS", ''),
+                    FakeToken("SEMICOLON", '')
+                ])
+            ])
+        ])
+        result = self.transformer.transform(tree)
+        code = [inst.code for inst in result.code]
+        self.assertEqual([
+            'ILSS t1 a_int b_int',
+            'JMPZ t1 else_label_0',
+            'IPRT a_int',
+            'JUMP endif_label_1',
+            'else_label_0:',
+            'IPRT b_int',
+            'endif_label_1:'
+        ], code)
 
 
 if __name__ == "__main__":

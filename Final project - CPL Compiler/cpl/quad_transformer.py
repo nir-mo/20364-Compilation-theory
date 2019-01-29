@@ -59,8 +59,35 @@ class CPLTransformer(Transformer):
     def type(self, tree):
         return Types.INT if tree[0].type == "INT" else Types.FLOAT
 
+    def if_stmt(self, tree):
+        return IfStmt(tree)
+
+    def stmt(self, tree):
+        return Stmt(tree)
+
+    def break_stmt(self, _):
+        return BreakStmt()
+
+    def continue_stmt(self, _):
+        return ContinueStmt()
+
+    def stmt_block(self, tree):
+        return StmtBlock(tree)
+
+    def stmtlist(self, tree):
+        return StmtList(tree)
+
+    def while_stmt(self, tree):
+        return WhileStmt(tree)
+
     def declarations(self, _):
         return [] # ignore the CPL declarations.
+
+    def caselist(self, tree):
+        return Caselist(tree)
+
+    def start(self, tree):
+        return tree[1]
 
 
 class CPLObject(object):
@@ -113,10 +140,124 @@ class CPLObject(object):
         return "%s(%s)" % (self.__class__.__name__, self.value)
 
 
-class CastStmt(CPLObject):
+class CPLStatement(object):
+    def __init__(self):
+        self.breaks = set()
+        self.continues = set()
+
+    def add_properties(self, stmt):
+        self.breaks = self.breaks.union(stmt.breaks)
+        self.continues = self.continues.union(stmt.continues)
+
+
+class Caselist(CPLStatement):
+    def __init__(self, tree):
+        CPLStatement.__init__(self)
+        if isinstance(tree[0], Caselist):
+            pass
+        else:
+            self.code = []
+
+
+class WhileStmt(CPLStatement):
+    def __init__(self, tree):
+        CPLStatement.__init__(self)
+        condition_label = Label("condition")
+        end_while_label = Label("end_while")
+        condition = tree[2]
+        self.code = (
+                [condition_label] +
+                condition.code +
+                [QUADInstruction.get_conditional_jump(condition.value, end_while_label)] +
+                tree[4].code +
+                [QUADInstruction.get_jump(condition_label), end_while_label]
+        )
+
+        for _break in tree[4].breaks:
+            _break.label = end_while_label
+
+        for _continue in tree[4].continues:
+            _continue.label = condition_label
+
+
+class StmtList(CPLStatement):
+    def __init__(self, tree):
+        CPLStatement.__init__(self)
+        if isinstance(tree[0], StmtList):
+            self.add_properties(tree[0])
+            self.add_properties(tree[1])
+            self.code = tree[0].code + tree[1].code
+        else:
+            self.code = []
+
+
+class StmtBlock(CPLStatement):
+    def __init__(self, tree):
+        CPLStatement.__init__(self)
+        self.add_properties(tree[1])
+        self.code = tree[1].code
+
+
+class ContinueStmt(CPLStatement):
+    def __init__(self):
+        CPLStatement.__init__(self)
+        self.label = None
+        self.continues.add(self)
+
+    @property
+    def code(self):
+        if self.label:
+            return [QUADInstruction.get_jump(self.label)]
+        else:
+            return [self]
+
+
+class BreakStmt(CPLStatement):
+    def __init__(self):
+        CPLStatement.__init__(self)
+        self.label = None
+        self.breaks.add(self)
+
+    @property
+    def code(self):
+        if self.label:
+            return [QUADInstruction.get_jump(self.label)]
+        else:
+            return [self]
+
+
+class Stmt(CPLStatement):
+    def __init__(self, tree):
+        CPLStatement.__init__(self)
+        self.code = tree[0].code
+        self.add_properties(tree[0])
+
+
+class IfStmt(CPLStatement):
+    def __init__(self, tree):
+        CPLStatement.__init__(self)
+        boolexpr = tree[2]
+        true_stmt = tree[4]
+        false_stmt = tree[6]
+        self.add_properties(true_stmt)
+        self.add_properties(false_stmt)
+        else_label = Label("else")
+        end_if_label = Label("endif")
+        self.code = (
+                boolexpr.code +
+                [QUADInstruction.get_conditional_jump(boolexpr.value, else_label)] +
+                true_stmt.code +
+                [QUADInstruction.get_jump(end_if_label), else_label] +
+                false_stmt.code +
+                [end_if_label]
+        )
+
+
+class CastStmt(CPLObject, CPLStatement):
     NODE_TYPE = "cast_stmt"
 
     def __init__(self, tree, symbol_table):
+        CPLStatement.__init__(self)
         id = Factor(tree, symbol_table)
         self.type = tree[4]
         expression = tree[7]
@@ -129,12 +270,15 @@ class CastStmt(CPLObject):
             self.code.append(QUADInstruction(self.value, expression.value, "", "CAST_TO_REAL", Types.INT))
         elif expression.type == Types.FLOAT and self.type == Types.INT:
             self.code.append(QUADInstruction(self.value, expression.value, "", "CAST_TO_INT", Types.FLOAT))
+        else:
+            self.code.append(QUADInstruction(self.value, expression.value, "", "=", self.type))
 
 
-class AssignmentStmt(CPLObject):
+class AssignmentStmt(CPLObject, CPLStatement):
     NODE_TYPE = "AssignmentStmt"
 
     def __init__(self, tree, symbol_table):
+        CPLStatement.__init__(self)
         left = Factor(tree, symbol_table)
         right = tree[2]
         if left.type == Types.INT and right.type == Types.FLOAT:
@@ -175,7 +319,7 @@ class BoolExpr(CPLObject):
         left = subtree[0]
         right = subtree[2]
         self.handle_binary_operation_default_values(subtree)
-        self.code += QUADInstruction.get_or(self.value, left.value, right.value, self.type)
+        self.code += QUADInstruction.get_or(self.value, left.value, right.value)
 
 
 class BoolTerm(CPLObject):
@@ -212,6 +356,9 @@ class BoolFactor(CPLObject):
         else:
             self.handle_boolexpression(tree)
 
+        # The result of RELOP is always INT!
+        self.type = Types.INT
+
     def handle_boolexpression(self, tree):
         self.copy_properties_of_node(tree, index=2)
         self.code.append(QUADInstruction.get_not(self.value, self.value, self.type))
@@ -225,7 +372,7 @@ class BoolFactor(CPLObject):
         self.code += [
             QUADInstruction(temp, left.value, right.value, "==", self.type),
             QUADInstruction(self.value, left.value, right.value, ">", self.type)
-        ] + QUADInstruction.get_or(self.value, self.value, temp, self.type)
+        ] + QUADInstruction.get_or(self.value, self.value, temp)
 
     def handle_smaller_or_equal(self, subtree):
         left = subtree[0]
@@ -236,7 +383,7 @@ class BoolFactor(CPLObject):
         self.code += [
             QUADInstruction(temp, left.value, right.value, "==", self.type),
             QUADInstruction(self.value, left.value, right.value, "<", self.type)
-        ] + QUADInstruction.get_or(self.value, self.value, temp, self.type)
+        ] + QUADInstruction.get_or(self.value, self.value, temp)
 
 
 class Expression(CPLObject):
@@ -321,12 +468,13 @@ class QUADInstruction(object):
         ("=", Types.FLOAT): "RASN",
         ("CAST_TO_REAL", Types.INT): "ITOR",
         ("CAST_TO_INT", Types.FLOAT): "RTOI",
+        ("conditional_jump", Types.INT): "JMPZ",
+        ("jump", Types.INT): "JUMP",
     }
 
     def __init__(self, dest, op1, op2, operator, type):
         self.dest, self.op1, self.op2, self.type = dest, op1, op2, type
         self.operator = operator
-        self.labels = set()
 
     @property
     def code(self):
@@ -343,8 +491,35 @@ class QUADInstruction(object):
         return cls(dest, op1, 1, "!=", type)
 
     @classmethod
-    def get_or(cls, dest, op1, op2, type):
-        return [cls(dest, op1, op2, "+", type), cls(dest, dest, 0, ">", type)]
+    def get_or(cls, dest, op1, op2):
+        return [cls(dest, op1, op2, "+", Types.INT), cls(dest, dest, 0, ">", Types.INT)]
+
+    @classmethod
+    def get_conditional_jump(cls, dest, label):
+        return cls(dest, label.name, "", "conditional_jump", Types.INT)
+
+    @classmethod
+    def get_jump(cls, label):
+        if label:
+            return cls(label.name, "", "", "jump", Types.INT)
+
+        return cls("UNDEF", "", "", "jump", Types.INT)
+
+
+class Label(object):
+    labels_counter = 0
+
+    def __init__(self, prefix=""):
+        self.name = "%s_label_%d" % (prefix, Label.labels_counter)
+        Label.labels_counter += 1
+
+    @property
+    def code(self):
+        return self.name + ":"
+
+    @staticmethod
+    def reset():
+        Label.labels_counter = 0
 
 
 if __name__ == "__main__":
@@ -352,9 +527,18 @@ if __name__ == "__main__":
     input_filename = sys.argv[1]
     with open(input_filename) as inf:
         ast = build_ast(CPLTokenizer(inf.read()))
-        print(ast)
+        #print(ast)
         sym = SymbolTable.build_form_ast(ast)
         c = CPLTransformer(sym)
-        #c.transform(ast)
+        ir = c.transform(ast)
+        for inst in ir.code:
+            try:
+                if type(inst) in (BreakStmt, ContinueStmt):
+                    print(inst.code[0].code)
+                else:
+                    print(inst.code)
+            except:
+                print(inst)
+
 
 
