@@ -4,9 +4,16 @@ from lark.visitors import Transformer
 
 from cla import CPLTokenizer
 from cpl_ast import build_ast
+from exceptions import CPLException, CPLCompoundException
 from symbol_table import SymbolTable, Types
 
 __author__ = "Nir Moshe"
+
+
+class SemanticError(CPLException):
+    """Represents semantic exception during building the IR."""
+    def __init__(self, line, message):
+        CPLException.__init__(self, line, message)
 
 
 class TemporaryVariables(object):
@@ -22,72 +29,121 @@ class TemporaryVariables(object):
         TemporaryVariables.variables_counter = 0
 
 
+class Label(object):
+    labels_counter = 0
+
+    def __init__(self, prefix=""):
+        self.name = "%s_label_%d" % (prefix, Label.labels_counter)
+        Label.labels_counter += 1
+
+    @property
+    def code(self):
+        return self.name + ":"
+
+    @staticmethod
+    def reset():
+        Label.labels_counter = 0
+
+
+def handle_semantic_error(func):
+    def wraps(self, tree):
+        cpl_object = func(self, tree)
+        try:
+            self.errors.extend(cpl_object.errors)
+        finally:
+            return cpl_object
+
+    return wraps
+
+
 class CPLTransformer(Transformer):
     def __init__(self, symbol_table):
         self.symbol_table = symbol_table
+        self.errors = []
 
+    @handle_semantic_error
     def factor(self, tree):
         return Factor(tree, self.symbol_table)
 
+    @handle_semantic_error
     def term(self, tree):
         return Term(tree)
 
+    @handle_semantic_error
     def expression(self, tree):
         return Expression(tree)
 
+    @handle_semantic_error
     def boolfactor(self, tree):
         return BoolFactor(tree)
 
+    @handle_semantic_error
     def boolterm(self, tree):
         return BoolTerm(tree)
 
+    @handle_semantic_error
     def boolexpr(self, tree):
         return BoolExpr(tree)
 
+    @handle_semantic_error
     def input_stmt(self, tree):
         return InputStatement(tree, self.symbol_table)
 
+    @handle_semantic_error
     def output_stmt(self, tree):
         return OutputStatement(tree)
 
+    @handle_semantic_error
     def assignment_stmt(self, tree):
         return AssignmentStmt(tree, self.symbol_table)
 
+    @handle_semantic_error
     def cast_stmt(self, tree):
         return CastStmt(tree, self.symbol_table)
 
+    @handle_semantic_error
     def type(self, tree):
         return Types.INT if tree[0].type == "INT" else Types.FLOAT
 
+    @handle_semantic_error
     def if_stmt(self, tree):
         return IfStmt(tree)
 
+    @handle_semantic_error
     def stmt(self, tree):
         return Stmt(tree)
 
-    def break_stmt(self, _):
-        return BreakStmt()
+    @handle_semantic_error
+    def break_stmt(self, tree):
+        return BreakStmt(tree)
 
-    def continue_stmt(self, _):
-        return ContinueStmt()
+    @handle_semantic_error
+    def continue_stmt(self, tree):
+        return ContinueStmt(tree)
 
+    @handle_semantic_error
     def stmt_block(self, tree):
         return StmtBlock(tree)
 
+    @handle_semantic_error
     def stmtlist(self, tree):
         return StmtList(tree)
 
+    @handle_semantic_error
     def while_stmt(self, tree):
         return WhileStmt(tree)
 
-    def declarations(self, _):
-        return [] # ignore the CPL declarations.
-
+    @handle_semantic_error
     def caselist(self, tree):
-        return Caselist(tree)
+        return Caselist(tree, self.symbol_table)
 
+    @handle_semantic_error
+    def switch_stmt(self, tree):
+        return SwitchStmt(tree)
+
+    @handle_semantic_error
     def start(self, tree):
-        return tree[1]
+        return Program(tree)
 
 
 class CPLObject(object):
@@ -150,11 +206,99 @@ class CPLStatement(object):
         self.continues = self.continues.union(stmt.continues)
 
 
-class Caselist(CPLStatement):
+class Program(CPLStatement):
     def __init__(self, tree):
         CPLStatement.__init__(self)
+        self.add_properties(tree[1])
+        self.code = tree[1].code + [QUADInstruction("", "", "", "halt", Types.INT)]
+        self.errors = []
+        for _break in self.breaks:
+            self.errors.append(
+                SemanticError(_break.line, "Invalid 'break' statement! 'break' should be inside 'while'/'switch'!")
+            )
+
+        for _continue in self.continues:
+            self.errors.append(
+                SemanticError(_continue.line, "Invalid 'continue' statement! 'continue' should be inside 'while'.")
+            )
+
+
+class SwitchStmt(CPLStatement):
+    """
+    Creates IR with the following template:
+
+                condition.code
+        case_1: if condition.result != 1 goto case_2
+                case_1.code
+                goto end_switch
+        case_2: if condition.result != 1 goto default
+                case_2.code
+                goto end_switch
+        default: default.code
+        end_switch:
+    """
+    def __init__(self, tree):
+        CPLStatement.__init__(self)
+        condition = tree[2]
+        caselist = tree[5]
+        default_stmt = tree[8]
+        if condition.type != Types.INT:
+            self.errors = [SemanticError(
+                line=tree[0].line,
+                message="Invalid switch condition! the condition must be integer!"
+            )]
+
+        self.continues = default_stmt.continues.union(caselist.continues)
+        cases = caselist.cases
+
+        labels = {num: Label("case_%d" % num) for num in cases}
+        end_label = Label("end_switch")
+        default_label = Label("default")
+        cases_code = []
+        ordered_cases = list(cases.items())
+        for i, (case_condition, stmt) in enumerate(ordered_cases):
+            temp = TemporaryVariables.get_new_temporary_variable()
+            cases_code.append(labels[case_condition])
+            cases_code.append(QUADInstruction(temp, condition.value, case_condition, "!=", Types.INT))
+            if i + 1 < len(ordered_cases):
+                next_state, _ = ordered_cases[i + 1]
+                cases_code.append(QUADInstruction.get_conditional_jump(temp, labels[next_state]))
+
+            cases_code += stmt.code
+            cases_code.append(QUADInstruction.get_jump(end_label))
+
+        self.code = (condition.code + cases_code + [default_label] + default_stmt.code + [end_label])
+        for _break in caselist.breaks.union(default_stmt.breaks):
+            _break.label = end_label
+
+
+class Caselist(CPLStatement):
+    def __init__(self, tree, symbol_table):
+        CPLStatement.__init__(self)
+        self.cases = {}
         if isinstance(tree[0], Caselist):
-            pass
+            caselist = tree[0]
+            self.add_properties(caselist)
+            self.add_properties(tree[4])
+            num = Factor([tree[2]], symbol_table)
+            if num.type != Types.INT:
+                self.errors = [
+                    SemanticError(line=tree[1].line, message="switch case type must be integer!")
+                ]
+
+            self.cases.update(caselist.cases)
+            if num.value in self.cases:
+                e = SemanticError(
+                    line=tree[1].line,
+                    message="Duplicate cases (%d) in the same switch!" % num.value
+                )
+                if hasattr(self, "errors"):
+                    self.errors.append(e)
+                else:
+                    self.errors = [e]
+
+            self.cases[num.value] = tree[4]
+            self.code = caselist.code + tree[4].code
         else:
             self.code = []
 
@@ -199,9 +343,10 @@ class StmtBlock(CPLStatement):
 
 
 class ContinueStmt(CPLStatement):
-    def __init__(self):
+    def __init__(self, tree):
         CPLStatement.__init__(self)
         self.label = None
+        self.line = tree[0].line
         self.continues.add(self)
 
     @property
@@ -213,9 +358,10 @@ class ContinueStmt(CPLStatement):
 
 
 class BreakStmt(CPLStatement):
-    def __init__(self):
+    def __init__(self, tree):
         CPLStatement.__init__(self)
         self.label = None
+        self.line = tree[0].line
         self.breaks.add(self)
 
     @property
@@ -263,7 +409,9 @@ class CastStmt(CPLObject, CPLStatement):
         expression = tree[7]
         self.value = id.value
         if id.type == Types.INT and self.type == Types.FLOAT:
-            raise ValueError("Invalid static_cast! can't assign float to int!")
+            self.errors = [
+                SemanticError(line=tree[1].line, message="Invalid static_cast! can't assign float to int!")
+            ]
 
         self.code = expression.code
         if expression.type == Types.INT and self.type == Types.FLOAT:
@@ -282,25 +430,29 @@ class AssignmentStmt(CPLObject, CPLStatement):
         left = Factor(tree, symbol_table)
         right = tree[2]
         if left.type == Types.INT and right.type == Types.FLOAT:
-            raise ValueError("Invalid assignment! can't assign float to int!")
+            self.errors = [
+                SemanticError(line=tree[1].line, message="Invalid assignment! can't assign float to int!")
+            ]
 
         self.type = Types.FLOAT if Types.FLOAT in (right.type, left.type) else Types.INT
         self.value = left.value
         self.code = right.code + [QUADInstruction(self.value, right.value, "", "=", self.type)]
 
 
-class OutputStatement(CPLObject):
+class OutputStatement(CPLObject, CPLStatement):
     NODE_TYPE = "output_stmt"
 
     def __init__(self, tree):
+        CPLStatement.__init__(self)
         self.copy_properties_of_node(tree, index=2)
         self.code.append(QUADInstruction(self.value, "", "", "WRITE", self.type))
 
 
-class InputStatement(CPLObject):
+class InputStatement(CPLObject, CPLStatement):
     NODE_TYPE = "input_stmt"
 
     def __init__(self, tree, symbol_table):
+        CPLStatement.__init__(self)
         tree[2] = Factor([tree[2]], symbol_table)
         self.copy_properties_of_node(tree, index=2)
         self.code = [QUADInstruction(self.value, "", "", "READ", self.type)]
@@ -428,7 +580,13 @@ class Factor(CPLObject):
     def handle_id(self, ast_subtree, symbol_table):
         symbol = symbol_table.get_symbol(ast_subtree[0].value)
         if not symbol:
-            raise ValueError("Undefined symbol: %s" % ast_subtree[0].value)
+            self.errors = [
+                SemanticError(line=ast_subtree[0].line, message="Undefined symbol: %s" % ast_subtree[0].value)
+            ]
+            self.type = None
+            self.value = ast_subtree[0].value
+            self.code = []
+            return
 
         self.type = symbol.type
         self.value = symbol.name
@@ -470,6 +628,7 @@ class QUADInstruction(object):
         ("CAST_TO_INT", Types.FLOAT): "RTOI",
         ("conditional_jump", Types.INT): "JMPZ",
         ("jump", Types.INT): "JUMP",
+        ("halt", Types.INT): "HALT"
     }
 
     def __init__(self, dest, op1, op2, operator, type):
@@ -506,20 +665,25 @@ class QUADInstruction(object):
         return cls("UNDEF", "", "", "jump", Types.INT)
 
 
-class Label(object):
-    labels_counter = 0
+def get_ir(cpl_ast, symbol_table):
+    Label.reset()
+    TemporaryVariables.reset()
+    transformer = CPLTransformer(symbol_table)
+    ir_tree = transformer.transform(cpl_ast)
+    if transformer.errors:
+        raise CPLCompoundException(transformer.errors)
 
-    def __init__(self, prefix=""):
-        self.name = "%s_label_%d" % (prefix, Label.labels_counter)
-        Label.labels_counter += 1
+    ir = []
+    for instruction in ir_tree.code:
+        try:
+            if type(instruction) in (BreakStmt, ContinueStmt):
+                ir.append(instruction.code[0].code)
+            else:
+                ir.append(instruction.code)
+        except Exception:
+            ir.append(instruction.code)
 
-    @property
-    def code(self):
-        return self.name + ":"
-
-    @staticmethod
-    def reset():
-        Label.labels_counter = 0
+    return ir
 
 
 if __name__ == "__main__":
@@ -527,18 +691,10 @@ if __name__ == "__main__":
     input_filename = sys.argv[1]
     with open(input_filename) as inf:
         ast = build_ast(CPLTokenizer(inf.read()))
-        #print(ast)
         sym = SymbolTable.build_form_ast(ast)
-        c = CPLTransformer(sym)
-        ir = c.transform(ast)
-        for inst in ir.code:
-            try:
-                if type(inst) in (BreakStmt, ContinueStmt):
-                    print(inst.code[0].code)
-                else:
-                    print(inst.code)
-            except:
-                print(inst)
+        for i in get_ir(ast, sym):
+            print("'%s', " % i)
+
 
 
 

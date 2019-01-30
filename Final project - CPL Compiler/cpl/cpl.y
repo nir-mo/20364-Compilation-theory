@@ -34,7 +34,7 @@ while_stmt: WHILE LEFT_PARENTHESIS boolexpr RIGHT_PARENTHESIS stmt
 
 switch_stmt: SWITCH LEFT_PARENTHESIS expression RIGHT_PARENTHESIS LEFT_CURLY_BRACKETS caselist DEFAULT COLON stmtlist RIGHT_CURLY_BRACKETS
 
-caselist: caselist CASE NUM COLON stmtlist SEMICOLON
+caselist: caselist CASE NUM COLON stmtlist
           | epsilon
 
 break_stmt: BREAK SEMICOLON
