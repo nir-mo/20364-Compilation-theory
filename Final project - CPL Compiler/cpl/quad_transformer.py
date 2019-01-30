@@ -581,7 +581,10 @@ class Factor(CPLObject):
         symbol = symbol_table.get_symbol(ast_subtree[0].value)
         if not symbol:
             self.errors = [
-                SemanticError(line=ast_subtree[0].line, message="Undefined symbol: %s" % ast_subtree[0].value)
+                SemanticError(
+                    line=ast_subtree[0].line,
+                    message="Undefined symbol: %s" % ast_subtree[0].value
+                )
             ]
             self.type = None
             self.value = ast_subtree[0].value
@@ -654,8 +657,8 @@ class QUADInstruction(object):
         return [cls(dest, op1, op2, "+", Types.INT), cls(dest, dest, 0, ">", Types.INT)]
 
     @classmethod
-    def get_conditional_jump(cls, dest, label):
-        return cls(dest, label.name, "", "conditional_jump", Types.INT)
+    def get_conditional_jump(cls, register, label):
+        return cls(label.name, register, "", "conditional_jump", Types.INT)
 
     @classmethod
     def get_jump(cls, label):
@@ -677,13 +680,39 @@ def get_ir(cpl_ast, symbol_table):
     for instruction in ir_tree.code:
         try:
             if type(instruction) in (BreakStmt, ContinueStmt):
-                ir.append(instruction.code[0].code)
+                ir.append(instruction.code[0])
             else:
-                ir.append(instruction.code)
+                ir.append(instruction)
         except Exception:
-            ir.append(instruction.code)
+            ir.append(instruction)
 
     return ir
+
+
+def get_quad(ir_code):
+    """Transforms IR code into QUAD code - changing all the labels into line numbers."""
+    line_number = 1
+    labels = {}
+    _quad = []
+    for inst in ir_code:
+        if type(inst) == Label:
+            labels[inst.name] = line_number
+        else:
+            _quad.append(inst)
+            line_number += 1
+
+    quad = []
+    for inst in _quad:
+        if inst.operator == "jump":
+            quad.append(QUADInstruction(labels[inst.dest], "", "", "jump", Types.INT))
+        elif inst.operator == "conditional_jump":
+            quad .append(
+                QUADInstruction(inst.op1, labels[inst.dest], "", "conditional_jump", Types.INT)
+            )
+        else:
+            quad.append(inst)
+
+    return quad
 
 
 if __name__ == "__main__":
@@ -692,8 +721,8 @@ if __name__ == "__main__":
     with open(input_filename) as inf:
         ast = build_ast(CPLTokenizer(inf.read()))
         sym = SymbolTable.build_form_ast(ast)
-        for i in get_ir(ast, sym):
-            print("'%s', " % i)
+        for i in get_quad(get_ir(ast, sym)):
+            print(i.code)
 
 
 

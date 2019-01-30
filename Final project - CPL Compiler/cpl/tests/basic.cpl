@@ -1,0 +1,10 @@
+/* Finding minimum between two numbers */
+a, b: float;
+{
+ read(a);
+ read(b);
+ if (a < b)
+    write(a);
+ else
+    write(b);
+}
