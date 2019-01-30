@@ -1,0 +1,25 @@
+/*
+ * This is an example of a valid CPL file.
+ *
+ * author: Nir Moshe
+ *
+ */
+
+a, b: int;
+{
+    switch(a) {
+        case 1: {
+            write(1);
+            break;
+        }
+        case 2: write(2);
+        case 3: {
+            switch(b) {
+                case 5: write(5);
+                default: break;
+            }
+        }
+        case 4: write(4);
+        default: write(0);
+    }
+}

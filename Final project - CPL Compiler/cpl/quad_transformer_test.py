@@ -1,17 +1,22 @@
-from collections import namedtuple
 from unittest import main, TestCase
 
 from lark import Tree
 
-from symbol_table import SymbolTable, Symbol, Types
-from quad_transformer import CPLTransformer, TemporaryVariables
+from cla import CPLTokenizer
+from cpl_ast import build_ast
+from symbol_table import SymbolTable, Types
+from quad_transformer import CPLTransformer, TemporaryVariables, Label, get_ir, SemanticError
 
-FakeToken = namedtuple("FakeToken", ["type", "value"])
+
+class FakeToken:
+    def __init__(self, type, value, line=0):
+        self.type, self.value, self.line = type, value, line
 
 
 class QuadTransformerTest(TestCase):
     def setUp(self):
         TemporaryVariables.reset()
+        Label.reset()
         symbol_table = SymbolTable()
         symbol_table.add_symbol("a_int", Types.INT, 1)
         symbol_table.add_symbol("b_int", Types.INT, 1)
@@ -203,8 +208,8 @@ class QuadTransformerTest(TestCase):
                 ])
             ])
         ])
-        with self.assertRaises(Exception):
-            self.transformer.transform(tree)
+        self.transformer.transform(tree)
+        self.assertIsInstance(self.transformer.errors[0], SemanticError)
 
     def test_input_stmt(self):
         tree = Tree("input_stmt", [
@@ -277,8 +282,8 @@ class QuadTransformerTest(TestCase):
                 ])
             ])
         ])
-        with self.assertRaises(ValueError):
-            self.transformer.transform(tree)
+        self.transformer.transform(tree)
+        self.assertIsInstance(self.transformer.errors[0], SemanticError)
 
     def test_if(self):
         tree = Tree("if_stmt", [
@@ -336,6 +341,63 @@ class QuadTransformerTest(TestCase):
             'IPRT b_int',
             'endif_label_1:'
         ], code)
+
+    def test_switch(self):
+        cpl_program = """
+        a, b: int;
+        {
+            switch(a) {
+                case 1: {
+                    write(1);
+                    break;
+                }
+                case 2: write(2);
+                case 3: {
+                    switch(b) {
+                        case 5: write(5);
+                        default: break;
+                    }
+                }
+                case 4: write(4);
+                default: write(0);
+            }
+        }
+        """
+        ast = build_ast(CPLTokenizer(cpl_program))
+        sym = SymbolTable.build_form_ast(ast)
+        code = [str(i) for i in get_ir(ast, sym)]
+        self.assertEqual(code, [
+            'case_1_label_3:',
+            'INQL t2 a 1',
+            'JMPZ t2 case_2_label_4',
+            'IPRT 1',
+            'JUMP end_switch_label_7',
+            'JUMP end_switch_label_7',
+            'case_2_label_4:',
+            'INQL t3 a 2',
+            'JMPZ t3 case_3_label_5',
+            'IPRT 2',
+            'JUMP end_switch_label_7',
+            'case_3_label_5:',
+            'INQL t4 a 3',
+            'JMPZ t4 case_4_label_6',
+            'case_5_label_0:',
+            'INQL t1 b 5',
+            'IPRT 5',
+            'JUMP end_switch_label_1',
+            'default_label_2:',
+            'JUMP end_switch_label_1',
+            'end_switch_label_1:',
+            'JUMP end_switch_label_7',
+            'case_4_label_6:',
+            'INQL t5 a 4',
+            'IPRT 4',
+            'JUMP end_switch_label_7',
+            'default_label_8:',
+            'IPRT 0',
+            'end_switch_label_7:',
+            'HALT'
+        ])
 
 
 if __name__ == "__main__":
