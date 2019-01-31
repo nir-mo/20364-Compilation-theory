@@ -28,59 +28,47 @@ def main():
 
     input_filename = sys.argv[1]
     input_filename_no_ext, _ = os.path.splitext(input_filename)
-
+    stderr = logging.getLogger("stderr")
+    stderr.addHandler(logging.StreamHandler(sys.stderr))
+    stderr.setLevel(logging.INFO)
     with open(input_filename) as input_fd:
-        with open(input_filename_no_ext + ".qud", "w") as output_fd:
-            output_file = logging.getLogger("file_output")
-            output_file.addHandler(logging.StreamHandler(output_fd))
-            output_file.setLevel(logging.INFO)
-            stderr = logging.getLogger("stderr")
-            stderr.addHandler(logging.StreamHandler(sys.stderr))
-            stderr.setLevel(logging.INFO)
-            compiler(
-                cpl_string=input_fd.read(),
-                output_stream=output_file,
-                error_stream=stderr,
-                signature="Nir Moshe, 300307824. Compilation Theory."
-            )
+        errors, quad = compiler(input_fd.read())
+        if not errors:
+            with open(input_filename_no_ext + ".qud", "w") as output_fd:
+                output_file = logging.getLogger("file_output")
+                output_file.addHandler(logging.StreamHandler(output_fd))
+                output_file.setLevel(logging.INFO)
+                for i in quad:
+                    output_file.info(i.code)
 
-    input_filename = sys.argv[1]
-    with open(input_filename) as inf:
-        ast = build_ast(CPLTokenizer(inf.read()))
-        sym = SymbolTable.build_form_ast(ast)
-        for i in get_quad(get_ir(ast, sym)):
-            print(i.code)
+                output_file.info("Nir Moshe, 300307824. Compilation Theory.")
+        else:
+            for error in errors:
+                stderr.error("Error in line: %d: %s." % (error.line, error.message))
+
+            stderr.info("Nir Moshe, 300307824. Compilation Theory.")
 
 
-def compiler(cpl_string, signature):
+def compiler(cpl_string):
     """
     The function simulates a CPL compiler.
 
     :param cpl_string: String which represent the CPL program.
-    :param output_stream: Tokens will be written to this stream.
-    :param error_stream: Errors will be written to this stream.
-    :param signature:
-        File signature. The signature will be written at the end of the `output_stream` and at the end of
-        `error_stream`.
+    :return pair of two lists (errors, quad).
     """
+    quad = []
     errors, ast = build_ast(CPLTokenizer(cpl_string))
-    if errors:
-        # TODO: handle errors.
-        return
+    if errors and not ast:
+        return errors, []
 
     try:
-        symbol_table = SymbolTable.build_form_ast(ast)
-    except CPLCompoundException as exceptions:
-        pass
-
-    try:
+        _errors, symbol_table = SymbolTable.build_form_ast(ast)
+        errors.extend(_errors)
         quad = get_quad(get_ir(ast, symbol_table))
-        quad.append(signature)
-    except CPLCompoundException:
-        pass
+    except CPLCompoundException as exception:
+        errors.extend(exception.exceptions)
 
-    error_stream.info(signature)
-    output_stream.info(signature)
+    return errors, quad
 
 
 if __name__ == "__main__":

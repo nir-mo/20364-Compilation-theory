@@ -12,9 +12,11 @@ Symbol = namedtuple("Symbol", field_names=["name", "type", "line"])
 
 class SymbolAlreadyExistsError(CPLException):
     def __init__(self, first_symbol, redefinition_symbol_name, line):
-        self.first_symbol = first_symbol
-        self.redefinition_symbol_name = redefinition_symbol_name
-        self.line = line
+        CPLException.__init__(
+            self,
+            line,
+            "Symbol %s already defined in line %d!" % (redefinition_symbol_name, first_symbol.line)
+        )
 
 
 class Types:
@@ -41,10 +43,7 @@ class SymbolTable(object):
         symbol_table = cls()
         builder = SymbolTableBuilder(symbol_table)
         builder.visit(cpl_ast)
-        if builder.errors:
-            raise CPLCompoundException(builder.errors)
-
-        return symbol_table
+        return builder.errors, symbol_table
 
 
 class SymbolTableBuilder(Visitor):

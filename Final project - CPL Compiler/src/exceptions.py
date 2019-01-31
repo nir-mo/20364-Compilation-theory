@@ -6,9 +6,9 @@
 
 class CPLException(Exception):
     """Represents a general CPL compilation error."""
-    def __init__(self, line, messgae):
+    def __init__(self, line, message):
         self.line = line
-        self.message = messgae
+        self.message = message
 
 
 class CPLCompoundException(CPLException):

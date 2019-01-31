@@ -6,7 +6,7 @@
 # Author: Nir Moshe.
 """
 cla.py usage:
-    python cla.py <cpl_file>.src
+    python cla.py <cpl_file>.cpl
 
 This script produces a new file <cpl_file>.tok which contains list of tokens which represents the CPL language.
 Every line in the *.tok file has 3 fields: the token name, the lexeme and attributes (optional).
@@ -20,7 +20,7 @@ from collections import namedtuple
 import os
 import re
 
-from lark import Lark
+from lark import Lark, UnexpectedToken
 from lark.lexer import Lexer, Token as LarkToken
 
 from exceptions import CPLCompoundException, CPLException
@@ -236,24 +236,24 @@ class CLALexerAdapter(Lexer):
 class InvalidTokenError(CPLException):
     """Represents syntax error in the CPL language"""
     def __init__(self, token, line):
-        CPLException.__init__(line, "Syntax error: Invalid symbol %s." + token.lexeme)
+        CPLException.__init__(self, line=line, message="Syntax error: Invalid symbol %s." % token.lexeme)
 
 
 def build_ast(tokens):
+    tokens = list(tokens)
     errors = [
-        InvalidTokenError(token, line) for token, line in tokens if token.name == CPLTokenizer.INVALID_TOKEN_NAME
+         InvalidTokenError(token, line) for token, line in tokens if token.name == CPLTokenizer.INVALID_TOKEN_NAME
     ]
     tree = None
     try:
         parser = get_default_cpl_parser()
         tree = parser.parse(tokens)
-    except Exception as e:
-        errors.append(e)
-    finally:
-        return errors, tree
+    except UnexpectedToken as e:
+        errors.append(CPLException(e.line, "Parsing error! unexpected token! expected one of the following tokens: %s" % ", ".join(e.expected)))
+
+    return errors, tree
 
 
 def get_default_cpl_parser():
-    with open(os.path.join(os.path.dirname(__file__), "src.y")) as CPLSyntax:
+    with open(os.path.join(os.path.dirname(__file__), "cpl.y")) as CPLSyntax:
         return Lark(CPLSyntax.read(), parser="lalr", lexer=CLALexerAdapter)
-
