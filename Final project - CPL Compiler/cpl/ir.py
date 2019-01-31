@@ -1,9 +1,12 @@
+# Author: Nir Moshe.
+# Date: 31-Jan-2019
+"""
+CPL IR: Transforms CPL's AST into IR and then to QUAD code.
+"""
 import abc
 
 from lark.visitors import Transformer
 
-from cla import CPLTokenizer
-from cpl_ast import build_ast
 from exceptions import CPLException, CPLCompoundException
 from symbol_table import SymbolTable, Types
 
@@ -13,7 +16,7 @@ __author__ = "Nir Moshe"
 class SemanticError(CPLException):
     """Represents semantic exception during building the IR."""
     def __init__(self, line, message):
-        CPLException.__init__(self, line, message)
+        CPLException.__init__(self, line, "Semantic error: " + message)
 
 
 class TemporaryVariables(object):
@@ -45,6 +48,71 @@ class Label(object):
         Label.labels_counter = 0
 
 
+class QUADInstruction(object):
+    QUAD_OPERATORS_TABLE = {
+        ("*", Types.INT): "IMLT",
+        ("*", Types.FLOAT): "RMLT",
+        ("/", Types.INT): "IDIV",
+        ("/", Types.FLOAT): "RDIV",
+        ("+", Types.INT): "IADD",
+        ("+", Types.FLOAT): "RADD",
+        ("-", Types.INT): "ISUB",
+        ("-", Types.FLOAT): "RSUB",
+        ("==", Types.INT): "IEQL",
+        ("==", Types.FLOAT): "REQL",
+        ("!=", Types.INT): "INQL",
+        ("!=", Types.FLOAT): "RNQL",
+        (">", Types.INT): "IGRT",
+        (">", Types.FLOAT): "RGRT",
+        ("<", Types.INT): "ILSS",
+        ("<", Types.FLOAT): "RLSS",
+        ("READ", Types.INT): "IINP",
+        ("READ", Types.FLOAT): "RINP",
+        ("WRITE", Types.INT): "IPRT",
+        ("WRITE", Types.FLOAT): "RPRT",
+        ("=", Types.INT): "IASN",
+        ("=", Types.FLOAT): "RASN",
+        ("CAST_TO_REAL", Types.INT): "ITOR",
+        ("CAST_TO_INT", Types.FLOAT): "RTOI",
+        ("conditional_jump", Types.INT): "JMPZ",
+        ("jump", Types.INT): "JUMP",
+        ("halt", Types.INT): "HALT"
+    }
+
+    def __init__(self, dest, op1, op2, operator, type):
+        self.dest, self.op1, self.op2, self.type = dest, op1, op2, type
+        self.operator = operator
+
+    @property
+    def code(self):
+        inst = "%s %s %s %s" % (
+            self.QUAD_OPERATORS_TABLE[(self.operator, self.type)],
+            self.dest,
+            self.op1,
+            self.op2
+        )
+        return inst.strip()
+
+    @classmethod
+    def get_not(cls, dest, op1, type):
+        return cls(dest, op1, 1, "!=", type)
+
+    @classmethod
+    def get_or(cls, dest, op1, op2):
+        return [cls(dest, op1, op2, "+", Types.INT), cls(dest, dest, 0, ">", Types.INT)]
+
+    @classmethod
+    def get_conditional_jump(cls, register, label):
+        return cls(label.name, register, "", "conditional_jump", Types.INT)
+
+    @classmethod
+    def get_jump(cls, label):
+        if label:
+            return cls(label.name, "", "", "jump", Types.INT)
+
+        return cls("UNDEF", "", "", "jump", Types.INT)
+
+
 def handle_semantic_error(func):
     def wraps(self, tree):
         cpl_object = func(self, tree)
@@ -57,6 +125,9 @@ def handle_semantic_error(func):
 
 
 class CPLTransformer(Transformer):
+    """
+    Iterates over the AST bottom to top. Implements the "visitor" design pattern.
+    """
     def __init__(self, symbol_table):
         self.symbol_table = symbol_table
         self.errors = []
@@ -147,6 +218,11 @@ class CPLTransformer(Transformer):
 
 
 class CPLObject(object):
+    """
+    Base object for CPL expressions. Every type of expression should inherit from this class.
+    The class contains set of functions/tools which might be useful, most of them solve common problems during the IR
+    generation.
+    """
     __metaclass__ = abc.ABCMeta
 
     def get_node_type(self):
@@ -231,7 +307,7 @@ class SwitchStmt(CPLStatement):
         case_1: if condition.result != 1 goto case_2
                 case_1.code
                 goto end_switch
-        case_2: if condition.result != 1 goto default
+        case_2: if condition.result != 2 goto default
                 case_2.code
                 goto end_switch
         default: default.code
@@ -259,10 +335,12 @@ class SwitchStmt(CPLStatement):
         for i, (case_condition, stmt) in enumerate(ordered_cases):
             temp = TemporaryVariables.get_new_temporary_variable()
             cases_code.append(labels[case_condition])
-            cases_code.append(QUADInstruction(temp, condition.value, case_condition, "!=", Types.INT))
+            cases_code.append(QUADInstruction(temp, condition.value, case_condition, "==", Types.INT))
             if i + 1 < len(ordered_cases):
                 next_state, _ = ordered_cases[i + 1]
                 cases_code.append(QUADInstruction.get_conditional_jump(temp, labels[next_state]))
+            else:
+                cases_code.append(QUADInstruction.get_conditional_jump(temp, default_label))
 
             cases_code += stmt.code
             cases_code.append(QUADInstruction.get_jump(end_label))
@@ -288,14 +366,14 @@ class Caselist(CPLStatement):
 
             self.cases.update(caselist.cases)
             if num.value in self.cases:
-                e = SemanticError(
+                error = SemanticError(
                     line=tree[1].line,
                     message="Duplicate cases (%d) in the same switch!" % num.value
                 )
                 if hasattr(self, "errors"):
-                    self.errors.append(e)
+                    self.errors.append(error)
                 else:
-                    self.errors = [e]
+                    self.errors = [error]
 
             self.cases[num.value] = tree[4]
             self.code = caselist.code + tree[4].code
@@ -304,6 +382,17 @@ class Caselist(CPLStatement):
 
 
 class WhileStmt(CPLStatement):
+    """
+        Creates IR with the following template:
+
+        condition_label:
+                    condition.code
+                    if condition.value == 0 goto end_while_label
+                    stmt_body.code
+                    goto condition
+        end_while_label:
+
+    """
     def __init__(self, tree):
         CPLStatement.__init__(self)
         condition_label = Label("condition")
@@ -380,6 +469,18 @@ class Stmt(CPLStatement):
 
 
 class IfStmt(CPLStatement):
+    """
+    Creates IR with the following template:
+
+            condition.code
+            if condition.value = 0 goto else_label
+            true_statement.code
+            goto end_if_label
+        else_label:
+            false_statement.code
+        end_if_label:
+
+    """
     def __init__(self, tree):
         CPLStatement.__init__(self)
         boolexpr = tree[2]
@@ -468,6 +569,10 @@ class BoolExpr(CPLObject):
             self.handle_or(tree)
 
     def handle_or(self, subtree):
+        """
+        Generates "||" by replacing the operator with the following snippet:
+            (a || b) -> (a + b > 0)
+        """
         left = subtree[0]
         right = subtree[2]
         self.handle_binary_operation_default_values(subtree)
@@ -484,6 +589,10 @@ class BoolTerm(CPLObject):
             self.handle_and(tree)
 
     def handle_and(self, subtree):
+        """
+        Generates "&&" by replacing the operator with the following snippet:
+            (a && b) -> ((a == 1) == b)
+        """
         left = subtree[0]
         right = subtree[2]
         self.handle_binary_operation_default_values(subtree)
@@ -512,10 +621,21 @@ class BoolFactor(CPLObject):
         self.type = Types.INT
 
     def handle_boolexpression(self, tree):
+        """
+        Generates "!" by replacing the operator with the following snippet:
+            !a -> (a != 1).
+             if a is 1 then (1 != 1) -> 0
+             if a is 0 then (0 != 1) -> 1
+        """
+
         self.copy_properties_of_node(tree, index=2)
         self.code.append(QUADInstruction.get_not(self.value, self.value, self.type))
 
     def handle_larger_or_equal(self, subtree):
+        """
+        Generates ">=" by replacing the operator with the following snippet:
+            (a >= b) -> ((a > b) || (a == b))
+        """
         left = subtree[0]
         right = subtree[2]
         self.handle_binary_operation_default_values(subtree)
@@ -527,6 +647,10 @@ class BoolFactor(CPLObject):
         ] + QUADInstruction.get_or(self.value, self.value, temp)
 
     def handle_smaller_or_equal(self, subtree):
+        """
+        Generates "<=" by replacing the operator with the following snippet:
+            (a <= b) -> ((a < b) || (a == b))
+        """
         left = subtree[0]
         right = subtree[2]
         self.handle_binary_operation_default_values(subtree)
@@ -603,72 +727,8 @@ class Factor(CPLObject):
             return Types.INT
 
 
-class QUADInstruction(object):
-    QUAD_OPERATORS_TABLE = {
-        ("*", Types.INT): "IMLT",
-        ("*", Types.FLOAT): "RMLT",
-        ("/", Types.INT): "IDIV",
-        ("/", Types.FLOAT): "RDIV",
-        ("+", Types.INT): "IADD",
-        ("+", Types.FLOAT): "RADD",
-        ("-", Types.INT): "ISUB",
-        ("-", Types.FLOAT): "RSUB",
-        ("==", Types.INT): "IEQL",
-        ("==", Types.FLOAT): "REQL",
-        ("!=", Types.INT): "INQL",
-        ("!=", Types.FLOAT): "RNQL",
-        (">", Types.INT): "IGRT",
-        (">", Types.FLOAT): "RGRT",
-        ("<", Types.INT): "ILSS",
-        ("<", Types.FLOAT): "RLSS",
-        ("READ", Types.INT): "IINP",
-        ("READ", Types.FLOAT): "RINP",
-        ("WRITE", Types.INT): "IPRT",
-        ("WRITE", Types.FLOAT): "RPRT",
-        ("=", Types.INT): "IASN",
-        ("=", Types.FLOAT): "RASN",
-        ("CAST_TO_REAL", Types.INT): "ITOR",
-        ("CAST_TO_INT", Types.FLOAT): "RTOI",
-        ("conditional_jump", Types.INT): "JMPZ",
-        ("jump", Types.INT): "JUMP",
-        ("halt", Types.INT): "HALT"
-    }
-
-    def __init__(self, dest, op1, op2, operator, type):
-        self.dest, self.op1, self.op2, self.type = dest, op1, op2, type
-        self.operator = operator
-
-    @property
-    def code(self):
-        inst = "%s %s %s %s" % (
-            self.QUAD_OPERATORS_TABLE[(self.operator, self.type)],
-            self.dest,
-            self.op1,
-            self.op2
-        )
-        return inst.strip()
-
-    @classmethod
-    def get_not(cls, dest, op1, type):
-        return cls(dest, op1, 1, "!=", type)
-
-    @classmethod
-    def get_or(cls, dest, op1, op2):
-        return [cls(dest, op1, op2, "+", Types.INT), cls(dest, dest, 0, ">", Types.INT)]
-
-    @classmethod
-    def get_conditional_jump(cls, register, label):
-        return cls(label.name, register, "", "conditional_jump", Types.INT)
-
-    @classmethod
-    def get_jump(cls, label):
-        if label:
-            return cls(label.name, "", "", "jump", Types.INT)
-
-        return cls("UNDEF", "", "", "jump", Types.INT)
-
-
 def get_ir(cpl_ast, symbol_table):
+    """Transforms the CPL AST into IR."""
     Label.reset()
     TemporaryVariables.reset()
     transformer = CPLTransformer(symbol_table)
@@ -678,12 +738,9 @@ def get_ir(cpl_ast, symbol_table):
 
     ir = []
     for instruction in ir_tree.code:
-        try:
-            if type(instruction) in (BreakStmt, ContinueStmt):
-                ir.append(instruction.code[0])
-            else:
-                ir.append(instruction)
-        except Exception:
+        if type(instruction) in (BreakStmt, ContinueStmt):
+            ir.append(instruction.code[0])
+        else:
             ir.append(instruction)
 
     return ir
@@ -707,23 +764,10 @@ def get_quad(ir_code):
             quad.append(QUADInstruction(labels[inst.dest], "", "", "jump", Types.INT))
         elif inst.operator == "conditional_jump":
             quad .append(
-                QUADInstruction(inst.op1, labels[inst.dest], "", "conditional_jump", Types.INT)
+                QUADInstruction(labels[inst.dest], inst.op1, "", "conditional_jump", Types.INT)
             )
         else:
             quad.append(inst)
 
     return quad
-
-
-if __name__ == "__main__":
-    import sys
-    input_filename = sys.argv[1]
-    with open(input_filename) as inf:
-        ast = build_ast(CPLTokenizer(inf.read()))
-        sym = SymbolTable.build_form_ast(ast)
-        for i in get_quad(get_ir(ast, sym)):
-            print(i.code)
-
-
-
 

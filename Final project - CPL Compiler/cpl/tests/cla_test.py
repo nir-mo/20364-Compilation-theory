@@ -8,6 +8,9 @@
 __author__ = "Nir Moshe"
 
 import unittest
+import sys
+sys.path.append("..")
+
 from cla import Token, CPLTokenizer, ContextToken
 
 

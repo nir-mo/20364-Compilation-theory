@@ -1,0 +1,9 @@
+RINP a
+RINP b
+RDIV t1 a b
+RASN d t1
+RPRT d
+RDIV t2 a b
+RTOI c t2
+IPRT c
+HALT

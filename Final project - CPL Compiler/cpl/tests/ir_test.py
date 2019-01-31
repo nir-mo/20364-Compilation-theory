@@ -1,11 +1,16 @@
+# Author: Nir Moshe.
+# Date: 31-Jan-2019
+
 from unittest import main, TestCase
+import sys
+sys.path.append("..")
 
 from lark import Tree
 
 from cla import CPLTokenizer
 from cpl_ast import build_ast
+from ir import CPLTransformer, TemporaryVariables, Label, get_ir, SemanticError
 from symbol_table import SymbolTable, Types
-from quad_transformer import CPLTransformer, TemporaryVariables, Label, get_ir, SemanticError
 
 
 class FakeToken:
@@ -334,7 +339,7 @@ class QuadTransformerTest(TestCase):
         code = [inst.code for inst in result.code]
         self.assertEqual([
             'ILSS t1 a_int b_int',
-            'JMPZ t1 else_label_0',
+            'JMPZ else_label_0 t1',
             'IPRT a_int',
             'JUMP endif_label_1',
             'else_label_0:',
@@ -365,24 +370,25 @@ class QuadTransformerTest(TestCase):
         """
         ast = build_ast(CPLTokenizer(cpl_program))
         sym = SymbolTable.build_form_ast(ast)
-        code = [str(i) for i in get_ir(ast, sym)]
+        code = [i.code for i in get_ir(ast, sym)]
         self.assertEqual(code, [
             'case_1_label_3:',
-            'INQL t2 a 1',
-            'JMPZ t2 case_2_label_4',
+            'IEQL t2 a 1',
+            'JMPZ case_2_label_4 t2',
             'IPRT 1',
             'JUMP end_switch_label_7',
             'JUMP end_switch_label_7',
             'case_2_label_4:',
-            'INQL t3 a 2',
-            'JMPZ t3 case_3_label_5',
+            'IEQL t3 a 2',
+            'JMPZ case_3_label_5 t3',
             'IPRT 2',
             'JUMP end_switch_label_7',
             'case_3_label_5:',
-            'INQL t4 a 3',
-            'JMPZ t4 case_4_label_6',
+            'IEQL t4 a 3',
+            'JMPZ case_4_label_6 t4',
             'case_5_label_0:',
-            'INQL t1 b 5',
+            'IEQL t1 b 5',
+            'JMPZ default_label_2 t1',
             'IPRT 5',
             'JUMP end_switch_label_1',
             'default_label_2:',
@@ -390,12 +396,50 @@ class QuadTransformerTest(TestCase):
             'end_switch_label_1:',
             'JUMP end_switch_label_7',
             'case_4_label_6:',
-            'INQL t5 a 4',
+            'IEQL t5 a 4',
+            'JMPZ default_label_8 t5',
             'IPRT 4',
             'JUMP end_switch_label_7',
             'default_label_8:',
             'IPRT 0',
             'end_switch_label_7:',
+            'HALT'
+        ])
+
+    def test_while(self):
+        cpl_program = """
+        a, b: float;
+        {
+            while (a < b) {
+                if (b  > 100)
+                    break;
+                else {
+                    a = a + 1;
+                    continue;
+                }
+            }
+        }
+        """
+        ast = build_ast(CPLTokenizer(cpl_program))
+        sym = SymbolTable.build_form_ast(ast)
+        code = [i.code for i in get_ir(ast, sym)]
+        self.assertEqual(code, [
+            'condition_label_2:',
+            'RLSS t1 a b',
+            'JMPZ end_while_label_3 t1',
+            'ITOR t3 100',
+            'RGRT t2 b t3',
+            'JMPZ else_label_0 t2',
+            'JUMP end_while_label_3',
+            'JUMP endif_label_1',
+            'else_label_0:',
+            'ITOR t5 1',
+            'RADD t4 a t5',
+            'RASN a t4',
+            'JUMP condition_label_2',
+            'endif_label_1:',
+            'JUMP condition_label_2',
+            'end_while_label_3:',
             'HALT'
         ])
 

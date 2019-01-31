@@ -1,0 +1,24 @@
+/*
+ * This is an example of a valid CPL file.
+ *
+ * author: Nir Moshe
+ *
+ */
+
+a, b: float;
+{
+    read(a);
+    read(b);
+    while (a < b) {
+        if (b  > 100) {
+            write(a);
+            break;
+        }
+        else {
+            a = a + 1;
+            continue;
+        }
+    }
+
+    write(a);
+}
