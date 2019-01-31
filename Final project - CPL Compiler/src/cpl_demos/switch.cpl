@@ -7,6 +7,8 @@
 
 a, b: int;
 {
+    read(a);
+    read(b);
     switch(a) {
         case 1: {
             write(1);
@@ -16,7 +18,7 @@ a, b: int;
         case 3: {
             switch(b) {
                 case 5: write(5);
-                default: break;
+                default: write(666);
             }
         }
         case 4: write(4);

@@ -6,7 +6,7 @@
 # Author: Nir Moshe.
 """
 cla.py usage:
-    python cla.py <cpl_file>.cpl
+    python cla.py <cpl_file>.src
 
 This script produces a new file <cpl_file>.tok which contains list of tokens which represents the CPL language.
 Every line in the *.tok file has 3 fields: the token name, the lexeme and attributes (optional).
@@ -17,10 +17,13 @@ Author: Nir Moshe.
 __author__ = "Nir Moshe"
 
 from collections import namedtuple
-import logging
 import os
 import re
-import sys
+
+from lark import Lark
+from lark.lexer import Lexer, Token as LarkToken
+
+from exceptions import CPLCompoundException, CPLException
 
 Token = namedtuple("Token", ["name", "lexeme", "attribute"])
 ContextToken = namedtuple("ContextToken", ["token", "line_number"])
@@ -218,46 +221,39 @@ class CPLTokenizer:
         return self.get_next_token()
 
 
-def compiler_stub(cpl_string, output_stream, error_stream, signature):
-    """
-    The function simulates a CPL compiler.
+class CLALexerAdapter(Lexer):
+    def __init__(self, *args, **kwargs):
+        Lexer.__init__(self)
 
-    :param cpl_string: String which represent the CPL program.
-    :param output_stream: Tokens will be written to this stream.
-    :param error_stream: Errors will be written to this stream.
-    :param signature:
-        File signature. The signature will be written at the end of the `output_stream` and at the end of
-        `error_stream`.
-    """
-    tokenizer = CPLTokenizer(cpl_string)
-    for token, line in tokenizer:
-        if token.name == CPLTokenizer.INVALID_TOKEN_NAME:
-            error_stream.error("Error: Invalid token: '%s' in line %d!", str(token.lexeme), line)
-        else:
-            output_stream.info("\t".join([str(field) for field in token]))
-
-    error_stream.info(signature)
-    output_stream.info(signature)
+    def lex(self, data):
+        for token, line in data:
+            if token.name == CPLTokenizer.INVALID_TOKEN_NAME:
+                continue
+            else:
+                yield LarkToken(token.name, value=token.attribute, line=line)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(__doc__)
-        sys.exit(1)
+class InvalidTokenError(CPLException):
+    """Represents syntax error in the CPL language"""
+    def __init__(self, token, line):
+        CPLException.__init__(line, "Syntax error: Invalid symbol %s." + token.lexeme)
 
-    input_filename = sys.argv[1]
-    input_filename_no_ext, _ = os.path.splitext(input_filename)
 
-    with open(input_filename) as input_fd, open(input_filename_no_ext + ".tok", "w") as output_fd:
-        output_file = logging.getLogger("file_output")
-        output_file.addHandler(logging.StreamHandler(output_fd))
-        output_file.setLevel(logging.INFO)
-        stderr = logging.getLogger("stderr")
-        stderr.addHandler(logging.StreamHandler(sys.stderr))
-        stderr.setLevel(logging.INFO)
-        compiler_stub(
-            cpl_string=input_fd.read(),
-            output_stream=output_file,
-            error_stream=stderr,
-            signature="Nir Moshe, 300307824. Compilation Theory."
-        )
+def build_ast(tokens):
+    errors = [
+        InvalidTokenError(token, line) for token, line in tokens if token.name == CPLTokenizer.INVALID_TOKEN_NAME
+    ]
+    tree = None
+    try:
+        parser = get_default_cpl_parser()
+        tree = parser.parse(tokens)
+    except Exception as e:
+        errors.append(e)
+    finally:
+        return errors, tree
+
+
+def get_default_cpl_parser():
+    with open(os.path.join(os.path.dirname(__file__), "src.y")) as CPLSyntax:
+        return Lark(CPLSyntax.read(), parser="lalr", lexer=CLALexerAdapter)
+

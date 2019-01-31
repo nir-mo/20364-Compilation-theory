@@ -61,7 +61,7 @@ def PRT(numt, av):
 
 
 def INP(numt, asym):
-    symtable.update(numt, asym, numt(raw_input(numt.__name__ + "? ")))
+    symtable.update(numt, asym, numt(input(numt.__name__ + "? ")))
 
 
 def EQL(numt, asym, av1, av2):
