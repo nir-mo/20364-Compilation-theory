@@ -6,7 +6,7 @@
 # Author: Nir Moshe.
 """
 cla.py usage:
-    python cla.py <cpl_file>.cpl
+    python cla.py <cpl_file>.src
 
 This script produces a new file <cpl_file>.tok which contains list of tokens which represents the CPL language.
 Every line in the *.tok file has 3 fields: the token name, the lexeme and attributes (optional).
