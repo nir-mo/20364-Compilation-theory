@@ -1,0 +1,20 @@
+/*
+ * This is an example of a valid CPL file.
+ *
+ * author: Nir Moshe
+ *
+ */
+
+a, b: float;
+{
+   while (1==1) {
+      while (a < b) {
+        a = a + 1;
+        if (a > 20) {
+            break;
+        } else {
+            continue;
+        }
+     }
+   }
+}
